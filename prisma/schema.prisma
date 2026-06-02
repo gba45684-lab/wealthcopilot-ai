@@ -1,0 +1,410 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USERS & AUTH ====================
+model User {
+  id                    String                 @id @default(cuid())
+  clerkId               String                 @unique
+  email                 String                 @unique
+  firstName             String?
+  lastName              String?
+  role                  UserRole               @default(DISTRIBUTOR)
+  avatar                String?
+  company               String?
+  phone                 String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  // Relations
+  clients               Client[]
+  campaigns             WhatsAppCampaign[]
+  commissions           Commission[]
+  contentGenerated      ContentGenerated[]
+  portfolioReviews      PortfolioReview[]
+  goals                 Goal[]
+  sips                  SIP[]
+  
+  @@index([clerkId])
+  @@index([email])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  DISTRIBUTOR
+  VIEWER
+}
+
+// ==================== CLIENT CRM ====================
+model Client {
+  id                    String                 @id @default(cuid())
+  distributorId         String
+  distributor           User                   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  
+  firstName             String
+  lastName              String
+  email                 String
+  phone                 String                 @unique
+  panNumber             String                 @unique
+  aadharNumber          String?
+  address               String?
+  city                  String?
+  state                 String?
+  pincode               String?
+  riskProfile           RiskProfile            @default(MODERATE)
+  annualIncome          Float?
+  investmentGoal        String?
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  lastContactDate       DateTime?
+  
+  // Relations
+  sips                  SIP[]
+  portfolios            Portfolio[]
+  goals                 Goal[]
+  campaigns             CampaignClient[]
+  commissions           Commission[]
+  
+  @@unique([distributorId, email])
+  @@index([distributorId])
+  @@index([phone])
+  @@index([panNumber])
+}
+
+enum RiskProfile {
+  CONSERVATIVE
+  MODERATE
+  AGGRESSIVE
+}
+
+// ==================== SIP TRACKER ====================
+model SIP {
+  id                    String                 @id @default(cuid())
+  clientId              String
+  client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  distributorId         String
+  distributor           User                   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  
+  fundName              String
+  fundIsin              String
+  fundHouse             String
+  monthlyAmount         Float
+  startDate             DateTime
+  endDate               DateTime?
+  frequency             SIPFrequency           @default(MONTHLY)
+  status                SIPStatus              @default(ACTIVE)
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  // Relations
+  installments          SIPInstallment[]
+  lapseRisks            LapseRisk[]
+  
+  @@index([clientId])
+  @@index([distributorId])
+  @@index([status])
+}
+
+enum SIPFrequency {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  ANNUAL
+}
+
+enum SIPStatus {
+  ACTIVE
+  PAUSED
+  LAPSED
+  MATURED
+  DISCONTINUED
+}
+
+model SIPInstallment {
+  id                    String                 @id @default(cuid())
+  sipId                 String
+  sip                   SIP                    @relation(fields: [sipId], references: [id], onDelete: Cascade)
+  
+  dueDate               DateTime
+  amount                Float
+  units                 Float?
+  nav                   Float?
+  status                InstallmentStatus      @default(PENDING)
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  @@index([sipId])
+  @@index([status])
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  FAILED
+  SKIPPED
+}
+
+// ==================== LAPSE PREDICTION ====================
+model LapseRisk {
+  id                    String                 @id @default(cuid())
+  sipId                 String
+  sip                   SIP                    @relation(fields: [sipId], references: [id], onDelete: Cascade)
+  
+  riskScore             Float                  @default(0.0) // 0-100
+  riskLevel             RiskLevel              @default(LOW)
+  reason                String?
+  lastAssessmentDate    DateTime               @default(now())
+  nextReviewDate        DateTime?
+  
+  // Factors
+  missedPayments        Int                    @default(0)
+  daysSinceLastPayment  Int                    @default(0)
+  performanceIssue      Boolean                @default(false)
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  @@unique([sipId])
+  @@index([riskLevel])
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// ==================== PORTFOLIO ====================
+model Portfolio {
+  id                    String                 @id @default(cuid())
+  clientId              String
+  client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  totalValue            Float                  @default(0)
+  allocationDate        DateTime               @default(now())
+  reviewDate            DateTime?
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  // Relations
+  holdings              PortfolioHolding[]
+  reviews               PortfolioReview[]
+  
+  @@index([clientId])
+}
+
+model PortfolioHolding {
+  id                    String                 @id @default(cuid())
+  portfolioId           String
+  portfolio             Portfolio              @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  
+  fundName              String
+  fundIsin              String
+  fundHouse             String
+  fundCategory          String
+  quantity              Float
+  currentValue          Float
+  investedAmount        Float
+  gains                 Float
+  allocation            Float                  // percentage
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  @@index([portfolioId])
+}
+
+model PortfolioReview {
+  id                    String                 @id @default(cuid())
+  portfolioId           String
+  portfolio             Portfolio              @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  distributorId         String
+  distributor           User                   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  
+  summary               String                 @db.Text
+  recommendations       String                 @db.Text
+  riskAssessment        String                 @db.Text
+  generatedAt           DateTime               @default(now())
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  @@index([portfolioId])
+  @@index([distributorId])
+}
+
+// ==================== GOALS ====================
+model Goal {
+  id                    String                 @id @default(cuid())
+  clientId              String
+  client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  distributorId         String
+  distributor           User                   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  
+  goalName              String
+  goalType              GoalType
+  targetAmount          Float
+  targetDate            DateTime
+  currentAmount         Float                  @default(0)
+  priority              Int                    @default(1)
+  status                GoalStatus             @default(ACTIVE)
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  @@index([clientId])
+  @@index([status])
+}
+
+enum GoalType {
+  RETIREMENT
+  EDUCATION
+  HOME
+  WEDDING
+  VEHICLE
+  VACATION
+  EMERGENCY_FUND
+  OTHER
+}
+
+enum GoalStatus {
+  ACTIVE
+  ACHIEVED
+  PAUSED
+  CANCELLED
+}
+
+// ==================== COMMISSION TRACKER ====================
+model Commission {
+  id                    String                 @id @default(cuid())
+  distributorId         String
+  distributor           User                   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  clientId              String
+  client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  arn                   String                 @unique
+  fundName              String
+  amount                Float
+  rate                  Float                  // percentage
+  transactionDate       DateTime
+  paymentDate           DateTime?
+  status                CommissionStatus       @default(PENDING)
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  @@index([distributorId])
+  @@index([clientId])
+  @@index([status])
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+// ==================== WHATSAPP CAMPAIGNS ====================
+model WhatsAppCampaign {
+  id                    String                 @id @default(cuid())
+  distributorId         String
+  distributor           User                   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  
+  title                 String
+  message               String                 @db.Text
+  templateName          String?
+  scheduledFor          DateTime?
+  sentAt                DateTime?
+  status                CampaignStatus         @default(DRAFT)
+  totalRecipients       Int                    @default(0)
+  successCount          Int                    @default(0)
+  failureCount          Int                    @default(0)
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  // Relations
+  recipients            CampaignClient[]
+  
+  @@index([distributorId])
+  @@index([status])
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+}
+
+model CampaignClient {
+  id                    String                 @id @default(cuid())
+  campaignId            String
+  campaign              WhatsAppCampaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  clientId              String
+  client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  sentAt                DateTime?
+  deliveredAt           DateTime?
+  readAt                DateTime?
+  status                MessageStatus          @default(PENDING)
+  messageId             String?
+  
+  @@unique([campaignId, clientId])
+  @@index([campaignId])
+  @@index([clientId])
+}
+
+enum MessageStatus {
+  PENDING
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ==================== AI CONTENT GENERATOR ====================
+model ContentGenerated {
+  id                    String                 @id @default(cuid())
+  distributorId         String
+  distributor           User                   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  
+  contentType           ContentType
+  prompt                String                 @db.Text
+  generatedContent      String                 @db.Text
+  tokens                Int
+  model                 String                 @default("gpt-4-turbo-preview")
+  
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  
+  @@index([distributorId])
+  @@index([contentType])
+}
+
+enum ContentType {
+  MARKET_ANALYSIS
+  CLIENT_LETTER
+  INVESTMENT_TIPS
+  CAMPAIGN_MESSAGE
+  PORTFOLIO_SUMMARY
+  FINANCIAL_ADVICE
+  NEWS_COMMENTARY
+}
